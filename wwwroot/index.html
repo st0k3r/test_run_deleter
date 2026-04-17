@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Run Deleter</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: "Segoe UI", sans-serif;
+            max-width: 960px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            color: #323130;
+        }
+
+        h1 { color: #0078d4; margin-bottom: 0.25rem; }
+
+        .meta { color: #605e5c; margin-bottom: 1.25rem; font-size: 0.95rem; }
+
+        button {
+            background: #0078d4;
+            color: white;
+            border: none;
+            padding: 0.4rem 0.9rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        button:hover { background: #005a9e; }
+        button:disabled { background: #a19f9d; cursor: not-allowed; }
+
+        button.danger { background: #d13438; }
+        button.danger:hover { background: #a4262c; }
+
+        .status {
+            margin: 0.75rem 0;
+            padding: 0.5rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            display: none;
+        }
+        .status.success { background: #dff6dd; color: #107c10; display: block; }
+        .status.error   { background: #fde7e9; color: #d13438;  display: block; }
+        .status.info    { background: #eff6fc; color: #0078d4;  display: block; }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 1rem;
+        }
+        th, td {
+            border: 1px solid #edebe9;
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+        }
+        th { background: #f3f2f1; font-weight: 600; }
+        tr:hover td { background: #faf9f8; }
+    </style>
+</head>
+<body>
+    <h1>Test Run Deleter</h1>
+    <p class="meta">Organization: <strong id="orgName"></strong> &mdash; Project: <strong id="projectName"></strong></p>
+
+    <button id="refreshBtn" onclick="loadRuns()">Refresh</button>
+
+    <div id="status" class="status"></div>
+
+    <table id="runsTable" style="display:none;">
+        <thead>
+            <tr>
+                <th>Run ID</th>
+                <th>Name</th>
+                <th>State</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="runsBody"></tbody>
+    </table>
+
+    <script>
+        async function loadRuns() {
+            setStatus('Loading test runs\u2026', 'info');
+            document.getElementById('refreshBtn').disabled = true;
+            document.getElementById('runsTable').style.display = 'none';
+
+            try {
+                const res = await fetch('/api/testruns');
+                if (!res.ok) throw new Error(`Server returned ${res.status}`);
+
+                const data = await res.json();
+                const runs = (data.value || []).filter(r => r.state !== '255');
+
+                if (runs.length === 0) {
+                    setStatus('No test runs found.', 'info');
+                    return;
+                }
+
+                const tbody = document.getElementById('runsBody');
+                tbody.innerHTML = '';
+
+                for (const run of runs) {
+                    const tr = document.createElement('tr');
+                    tr.id = `run-${run.id}`;
+                    tr.innerHTML = `
+                        <td>${run.id}</td>
+                        <td>${escapeHtml(run.name)}</td>
+                        <td>${escapeHtml(run.state)}</td>
+                        <td><button class="danger" onclick="deleteRun(${run.id}, this)">Delete</button></td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+
+                document.getElementById('runsTable').style.display = '';
+                clearStatus();
+            } catch (err) {
+                setStatus(`Error loading runs: ${err.message}`, 'error');
+            } finally {
+                document.getElementById('refreshBtn').disabled = false;
+            }
+        }
+
+        async function deleteRun(id, btn) {
+            if (!confirm(`Delete test run ${id}?`)) return;
+
+            btn.disabled = true;
+
+            try {
+                const res = await fetch(`/api/testruns/${id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error(`Server returned ${res.status}`);
+
+                document.getElementById(`run-${id}`)?.remove();
+
+                if (document.getElementById('runsBody').rows.length === 0) {
+                    document.getElementById('runsTable').style.display = 'none';
+                }
+
+                setStatus(`Successfully deleted test run ${id}.`, 'success');
+            } catch (err) {
+                setStatus(`Error deleting run ${id}: ${err.message}`, 'error');
+                btn.disabled = false;
+            }
+        }
+
+        function setStatus(msg, type) {
+            const el = document.getElementById('status');
+            el.textContent = msg;
+            el.className = `status ${type}`;
+        }
+
+        function clearStatus() {
+            const el = document.getElementById('status');
+            el.className = 'status';
+        }
+
+        function escapeHtml(str) {
+            return String(str ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        async function init() {
+            try {
+                const res = await fetch('/api/config');
+                const cfg = await res.json();
+                document.getElementById('orgName').textContent = cfg.org;
+                document.getElementById('projectName').textContent = cfg.project;
+            } catch {
+                // non-critical — header stays blank if config fails
+            }
+            loadRuns();
+        }
+
+        init();
+    </script>
+</body>
+</html>
